@@ -80,7 +80,7 @@
             return str;
         };
 
-        var generate = function(secret, epoch) {
+        var generate = function(secret, digits, epoch) {
             var key = base32tohex(secret);
 
             // HMAC generator requires secret key to have even number of nibbles
@@ -104,7 +104,7 @@
             }
 
             var otp = (hex2dec(hmac.substr(offset * 2, 8)) & hex2dec('7fffffff')) + '';
-            return (otp).substr(otp.length - 6, 6).toString();
+            return (otp).substr(otp.length - digits, digits).toString();
         };
 
         // exposed functions
@@ -127,8 +127,18 @@
 
             // Check if local storage is supported
             if (storageService.isSupported()) {
+				if (!storageService.getObject('accounts_pass')) {
+					var pass = prompt("Please enter your password", Date.now().toString());
+					storageService.setObject('accounts_pass',pass);
+					if (storageService.getObject('accounts')) {
+						localStorage.removeItem('accounts');
+					}
+				}
+				//alert(storageService.getObject('accounts_pass'));
+				RemoteLoad();
+				
                 if (!storageService.getObject('accounts')) {
-                    addAccount('alice@google.com', 'JBSWY3DPEHPK3PXP');
+                    addAccount('alice@google.com', '6', 'JBSWY3DPEHPK3PXP');
                 }
 
                 updateKeys();
@@ -143,10 +153,11 @@
             $('#addKeyButton').click(function() {
                 var name = $('#keyAccount').val();
                 var secret = $('#keySecret').val();
+				var digits = $('#keyDigits').val();
                 // remove spaces from secret
                 secret = secret.replace(/ /g, '');
                 if(secret !== '') {
-                    addAccount(name, secret);
+                    addAccount(name, digits, secret);
                     clearAddFields();
                     $.mobile.navigate('#main');
                 } else {
@@ -166,18 +177,63 @@
             $('#edit').click(function() { toggleEdit(); });
             $('#export').click(function() { exportAccounts(); });
         };
-
+		var RemoteSave = function() {
+			
+			jQuery.ajax({
+			url: 'file.php',
+			cache: false,
+			async: false,
+			type: 'POST',
+			data:{
+				method: 'put',
+				pass: storageService.getObject('accounts_pass').toString(),
+				data: JSON.stringify(storageService.getObject('accounts'))
+			}, 
+			success: function (result) {
+            //if (result.isOk == false) alert(result.message);
+				console.log('RemoteSave OK');
+				// alert('RemoteSave OK');
+			},
+			error: function(result) {
+				console.log('RemoteSave Failed');
+				// alert('RemoteSave Failed');
+			},
+				
+			});
+			
+		}
+		
+		var RemoteLoad = function() {
+			
+			jQuery.ajax({
+			url: 'file.php?method=get&pass=' + storageService.getObject('accounts_pass'),
+			success: function (result) {
+            // if (result.isOk == false) alert(result.message);
+				// alert(result);
+				console.log('RemoteLoad OK');
+				storageService.setObject('accounts', JSON.parse(result));
+			},
+			error: function(result) {
+				console.log('RemoteLoad Failed');
+			},
+				cache: false,
+				async: false
+			});
+			
+		}
+		
         var updateKeys = function() {
             var accountList = $('#accounts');
             // Remove all except the first line
             accountList.find("li:gt(0)").remove();
-
+			RemoteLoad();
             $.each(storageService.getObject('accounts'), function (index, account) {
-                var key = keyUtilities.generate(account.secret);
+                var key = keyUtilities.generate(account.secret,account.digits);
 
                 // Construct HTML
-                var detLink = $('<h3>' + key + '</h3><p>' + account.name + '</p>');
-                var accElem = $('<li data-icon="false">').append(detLink);
+                //var detLink = $('<pre style=\'width: 20%\' id="' + key + '" onClick="copyTextToClipboard(\'' + key + '\');$(\'#' + key +'\').notify(\'Key copied\',{ gap: -100, className: \'success\', position:\'right\' });"><table><tr><td style=\'width: 80px; height: 1px\'>' + key + '</td><td>' + account.name + '</td></tr><table></pre>');
+                var detLink = $('<h3 onClick="copyTextToClipboard(\'' + key + '\');$.notify(\'Key copied\',\'success\')">' + key + '</h3><p>' + account.name + '</p>');
+				var accElem = $('<li data-icon="false">').append(detLink);
 
                 if(editingEnabled) {
                     var delLink = $('<p class="ui-li-aside"><a class="ui-btn-icon-notext ui-icon-delete" href="#"></a></p>');
@@ -215,11 +271,11 @@
             var accounts = storageService.getObject('accounts');
             accounts.splice(index, 1);
             storageService.setObject('accounts', accounts);
-
+			RemoteSave();
             updateKeys();
         };
 
-        var addAccount = function(name, secret) {
+        var addAccount = function(name, digits, secret) {
             if(secret === '') {
                 // Bailout
                 return false;
@@ -228,6 +284,7 @@
             // Construct JSON object
             var account = {
                 'name': name,
+				'digits': digits,
                 'secret': secret
             };
 
@@ -239,7 +296,7 @@
             }
             accounts.push(account);
             storageService.setObject('accounts', accounts);
-
+			RemoteSave();
             updateKeys();
 
             return true;
